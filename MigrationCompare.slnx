@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="MigrationCompare.App/MigrationCompare.App.csproj" />
+  <Project Path="MigrationCompare.Core/MigrationCompare.Core.csproj" />
+  <Project Path="MigrationCompare.Tests/MigrationCompare.Tests.csproj" />
+</Solution>
