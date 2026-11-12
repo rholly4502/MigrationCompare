@@ -1,0 +1,120 @@
+<Window x:Class="MigrationCompare.Wpf.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="MigrationCompare — Komparasi &amp; Kualitas Data"
+        Height="680" Width="1050"
+        WindowStartupLocation="CenterScreen"
+        FontFamily="Segoe UI" FontSize="13">
+
+    <Window.Resources>
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="Margin" Value="0,6,8,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel Margin="16">
+        <!-- Header atas -->
+        <TextBlock DockPanel.Dock="Top" FontSize="18" FontWeight="Bold"
+                   Text="MigrationCompare" Margin="0,0,0,4"/>
+        <TextBlock DockPanel.Dock="Top" Foreground="Gray" Margin="0,0,0,12"
+                   Text="Bandingkan dua sumber data &amp; periksa kualitas (read-only)."/>
+
+        <!-- Status bar bawah -->
+        <StatusBar DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <StatusBarItem>
+                <TextBlock x:Name="StatusText" Text="Siap."/>
+            </StatusBarItem>
+        </StatusBar>
+
+        <!-- Panel hasil (isi utama) -->
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="50"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Konfigurasi sumber A & B -->
+            <Grid Grid.Row="0" Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="12"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Sumber A -->
+                <GroupBox Grid.Column="0" Header="Sumber A">
+                    <StackPanel Margin="8" x:Name="PanelA">
+                        <ComboBox x:Name="KindA" SelectedIndex="0">
+                            <ComboBoxItem Content="SQL Server"/>
+                            <ComboBoxItem Content="CSV File"/>
+                        </ComboBox>
+                        <TextBox x:Name="ConnectionA" Margin="0,6,0,0"
+                                 ToolTip="Connection string (SQL) atau path file (CSV)"/>
+                        <TextBox x:Name="QueryA" Margin="0,6,0,0" AcceptsReturn="True"
+                                 Height="52" ToolTip="Query SELECT (hanya untuk SQL)"/>
+                        <TextBox x:Name="KeysA" Margin="0,6,0,0"
+                                 ToolTip="Kolom kunci, pisah koma (mis. BillingNo)"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- Sumber B -->
+                <GroupBox Grid.Column="2" Header="Sumber B">
+                    <StackPanel Margin="8" x:Name="PanelB">
+                        <ComboBox x:Name="KindB" SelectedIndex="0">
+                            <ComboBoxItem Content="SQL Server"/>
+                            <ComboBoxItem Content="CSV File"/>
+                        </ComboBox>
+                        <TextBox x:Name="ConnectionB" Margin="0,6,0,0"
+                                 ToolTip="Connection string (SQL) atau path file (CSV)"/>
+                        <TextBox x:Name="QueryB" Margin="0,6,0,0" AcceptsReturn="True"
+                                 Height="52" ToolTip="Query SELECT (hanya untuk SQL)"/>
+                        <TextBox x:Name="KeysB" Margin="0,6,0,0"
+                                 ToolTip="Kolom kunci, pisah koma (mis. BillingNo)"/>
+                    </StackPanel>
+                </GroupBox>
+            </Grid>
+
+            <!-- Tombol aksi -->
+            <StackPanel Grid.Row="1" Orientation="Horizontal">
+                <CheckBox x:Name="ToleranceBox" Content="Toleransi numerik"
+                          VerticalAlignment="Center" Margin="0,6,8,0"/>
+                <TextBox x:Name="ToleranceInput" Width="70" VerticalAlignment="Center"
+                         Text="0" Margin="0,6,16,0"/>
+                <Button x:Name="CompareBtn" Content="Bandingkan" Click="CompareBtn_Click"/>
+                <Button x:Name="SaveBtn" Content="Simpan Laporan (md/csv)"
+                        Click="SaveBtn_Click" IsEnabled="False"/>
+            </StackPanel>
+
+            <!-- Hasil ringkasan -->
+            <Border Grid.Row="2" Background="#F5F5F5" BorderBrush="#DDD" BorderThickness="1"
+                    CornerRadius="4" Margin="0,8,0,0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0">
+                    <TextBlock FontWeight="Bold" Text="Ringkasan: " VerticalAlignment="Center"/>
+                    <TextBlock x:Name="SummaryText" VerticalAlignment="Center"
+                               Text="belum ada hasil."/>
+                </StackPanel>
+            </Border>
+
+            <!-- Grid data hasil -->
+            <DataGrid x:Name="ResultGrid" Grid.Row="3" Margin="0,8,0,0"
+                      AutoGenerateColumns="True" IsReadOnly="True"
+                      CanUserAddRows="False" CanUserDeleteRows="False"
+                      HeadersVisibility="Column" GridLinesVisibility="All"
+                      AlternatingRowBackground="#F7F9FC"/>
+
+            <!-- Keterangan sumber grid -->
+            <TextBlock x:Name="GridCaption" Grid.Row="4" Margin="0,6,0,0"
+                       Text="Hasil akan muncul di sini." Foreground="Gray"/>
+        </Grid>
+    </DockPanel>
+</Window>
