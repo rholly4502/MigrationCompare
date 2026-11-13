@@ -13,6 +13,7 @@ public sealed class SqlSource : IDataSource
     private SqlDataReader? _reader;
     private Dictionary<string, int>? _columnIndex;
     private int _fieldCount;
+    private Func<SqlDataReader, int, string?>[] _getters = Array.Empty<Func<SqlDataReader, int, string?>>();
 
     public string Name => _def.Name;
 
@@ -92,6 +93,58 @@ public sealed class SqlSource : IDataSource
         return (conn.DataSource, conn.Database, columns);
     }
 
+    /// <summary>Memilih getter tercepat untuk tiap kolom berdasarkan tipe field (hindari boxing GetValue).</summary>
+    private static Func<SqlDataReader, int, string?> CreateGetter(Type ft)
+    {
+        if (ft == typeof(string))
+            return (r, i) => r.GetString(i);
+
+        if (ft == typeof(decimal))
+            return (r, i) => r.GetDecimal(i).ToString(CultureInfo.InvariantCulture);
+        if (ft == typeof(double))
+            return (r, i) => r.GetDouble(i).ToString(CultureInfo.InvariantCulture);
+        if (ft == typeof(float))
+            return (r, i) => r.GetFloat(i).ToString(CultureInfo.InvariantCulture);
+
+        if (ft == typeof(byte))
+            return (r, i) => r.GetByte(i).ToString(CultureInfo.InvariantCulture);
+        if (ft == typeof(sbyte))
+            return (r, i) => r.GetByte(i).ToString(CultureInfo.InvariantCulture);
+        if (ft == typeof(short))
+            return (r, i) => r.GetInt16(i).ToString(CultureInfo.InvariantCulture);
+        if (ft == typeof(ushort))
+            return (r, i) => r.GetInt16(i).ToString(CultureInfo.InvariantCulture);
+        if (ft == typeof(int))
+            return (r, i) => r.GetInt32(i).ToString(CultureInfo.InvariantCulture);
+        if (ft == typeof(uint))
+            return (r, i) => r.GetInt32(i).ToString(CultureInfo.InvariantCulture);
+        if (ft == typeof(long))
+            return (r, i) => r.GetInt64(i).ToString(CultureInfo.InvariantCulture);
+        if (ft == typeof(ulong))
+            return (r, i) => r.GetInt64(i).ToString(CultureInfo.InvariantCulture);
+
+        if (ft == typeof(bool))
+            return (r, i) => r.GetBoolean(i) ? "true" : "false";
+
+        if (ft == typeof(DateTime))
+            return (r, i) => r.GetDateTime(i).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+        if (ft == typeof(DateTimeOffset))
+            return (r, i) => r.GetDateTimeOffset(i).ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture);
+
+        if (ft == typeof(Guid))
+            return (r, i) => r.GetGuid(i).ToString("D", CultureInfo.InvariantCulture);
+
+        if (ft == typeof(byte[]))
+            return (r, i) => Convert.ToBase64String((byte[])r.GetValue(i));
+
+        // Fallback: hindari Convert.ToString pada null di atas.
+        return (r, i) =>
+        {
+            var v = r.GetValue(i);
+            return v is null ? null : Convert.ToString(v, CultureInfo.InvariantCulture);
+        };
+    }
+
     public IReadOnlyList<string> Open()
     {
         Dispose();
@@ -109,12 +162,15 @@ public sealed class SqlSource : IDataSource
         var columns = new List<string>(_fieldCount);
         _columnIndex = new Dictionary<string, int>(_fieldCount, StringComparer.OrdinalIgnoreCase);
 
+        var getters = new Func<SqlDataReader, int, string?>[_fieldCount];
         for (int i = 0; i < _fieldCount; i++)
         {
             var colName = _reader.GetName(i);
             columns.Add(colName);
             _columnIndex.TryAdd(colName, i);
+            getters[i] = CreateGetter(_reader.GetFieldType(i));
         }
+        _getters = getters;
 
         return columns;
     }
@@ -124,11 +180,12 @@ public sealed class SqlSource : IDataSource
         if (_reader is null || !_reader.Read()) return null;
 
         var values = new string?[_fieldCount];
+        var getters = _getters;
         for (int i = 0; i < _fieldCount; i++)
         {
             if (!_reader.IsDBNull(i))
             {
-                values[i] = Convert.ToString(_reader.GetValue(i), CultureInfo.InvariantCulture);
+                values[i] = getters[i](_reader, i);
             }
         }
         return new DataRow(_columnIndex!, values);
