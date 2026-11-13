@@ -25,11 +25,78 @@ public sealed class SqlSource : IDataSource
         _def = def;
     }
 
+    /// <summary>Membangun connection string final dari field terstruktur dan/atau connection string manual.</summary>
+    public static string ResolveConnectionString(DataSourceDefinition def)
+    {
+        var builder = string.IsNullOrWhiteSpace(def.Connection)
+            ? new SqlConnectionStringBuilder()
+            : new SqlConnectionStringBuilder(def.Connection);
+
+        if (!string.IsNullOrWhiteSpace(def.Server))
+            builder.DataSource = def.Server.Trim();
+
+        if (!string.IsNullOrWhiteSpace(def.Database))
+            builder.InitialCatalog = def.Database.Trim();
+
+        if (!string.IsNullOrWhiteSpace(def.Username))
+        {
+            builder.Remove("Trusted_Connection");
+            builder.Remove("Integrated Security");
+            builder.IntegratedSecurity = false;
+            builder.UserID = def.Username.Trim();
+            builder.Password = def.Password;
+        }
+        else if (def.UseWindowsAuth)
+        {
+            builder.IntegratedSecurity = true;
+        }
+
+        if (!builder.ContainsKey("TrustServerCertificate"))
+            builder.TrustServerCertificate = true;
+
+        if (string.IsNullOrWhiteSpace(builder.DataSource))
+            throw new InvalidOperationException($"'{def.Name}': Server atau Connection String SQL wajib diisi.");
+
+        return builder.ConnectionString;
+    }
+
+    /// <summary>Menguji koneksi ke SQL Server dan memvalidasi skema query (jika diisi) tanpa menarik seluruh baris.</summary>
+    public static async Task<(string server, string database, IReadOnlyList<string> columns)> TestConnectionAsync(
+        DataSourceDefinition def,
+        int timeoutSeconds = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var connStr = ResolveConnectionString(def);
+        var builder = new SqlConnectionStringBuilder(connStr)
+        {
+            ConnectTimeout = timeoutSeconds
+        };
+
+        await using var conn = new SqlConnection(builder.ConnectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        var columns = new List<string>();
+        if (!string.IsNullOrWhiteSpace(def.Query))
+        {
+            await using var cmd = new SqlCommand(def.Query, conn)
+            {
+                CommandTimeout = timeoutSeconds
+            };
+            await using var reader = await cmd.ExecuteReaderAsync(System.Data.CommandBehavior.SchemaOnly, cancellationToken);
+            for (int i = 0; i < reader.FieldCount; i++)
+            {
+                columns.Add(reader.GetName(i));
+            }
+        }
+
+        return (conn.DataSource, conn.Database, columns);
+    }
+
     public IReadOnlyList<string> Open()
     {
         Dispose();
 
-        _connection = new SqlConnection(_def.Connection);
+        _connection = new SqlConnection(ResolveConnectionString(_def));
         _connection.Open();
 
         _command = new SqlCommand(_def.Query, _connection)

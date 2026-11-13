@@ -11,6 +11,21 @@ public sealed class DataSourceDefinition
     /// <summary>Connection string (untuk SQL) atau path file (untuk CSV).</summary>
     public string Connection { get; set; } = "";
 
+    /// <summary>Host/Server SQL (opsional jika sudah tercantum di Connection).</summary>
+    public string Server { get; set; } = "";
+
+    /// <summary>Nama Database SQL (opsional jika sudah tercantum di Connection).</summary>
+    public string Database { get; set; } = "";
+
+    /// <summary>Username SQL Authentication (jika diisi, Trusted_Connection/Windows Auth dinonaktifkan).</summary>
+    public string Username { get; set; } = "";
+
+    /// <summary>Password SQL Authentication.</summary>
+    public string Password { get; set; } = "";
+
+    /// <summary>Gunakan Windows Authentication (hanya bila Username kosong).</summary>
+    public bool UseWindowsAuth { get; set; }
+
     /// <summary>Query SELECT (untuk SQL). Diabaikan untuk CSV.</summary>
     public string Query { get; set; } = "";
 

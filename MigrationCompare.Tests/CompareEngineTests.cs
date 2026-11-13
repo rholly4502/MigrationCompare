@@ -2,6 +2,7 @@ using MigrationCompare.Core.Compare;
 using MigrationCompare.Core.Models;
 using MigrationCompare.Core.Quality;
 using MigrationCompare.Core.Report;
+using MigrationCompare.Core.Sources;
 
 namespace MigrationCompare.Tests;
 
@@ -165,5 +166,29 @@ public class CompareEngineTests
         Assert.Contains("kolom,null,kosong", csv);
         Assert.Contains("key_duplikat,jumlah_duplikat_tambahan", csv);
         Assert.Contains("1,1", csv);
+    }
+
+    [Fact]
+    public void SqlSource_ResolveConnectionString_UsesSqlAuthAndRemovesTrustedConnection()
+    {
+        var def = new DataSourceDefinition
+        {
+            Name = "A",
+            Kind = "sql",
+            Connection = "Server=oldhost;Database=OldDb;Trusted_Connection=True;",
+            Server = "newhost,1433",
+            Database = "NewDb",
+            Username = "sql_user",
+            Password = "secret_password"
+        };
+
+        var connStr = SqlSource.ResolveConnectionString(def);
+        var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connStr);
+
+        Assert.Equal("newhost,1433", builder.DataSource);
+        Assert.Equal("NewDb", builder.InitialCatalog);
+        Assert.False(builder.IntegratedSecurity);
+        Assert.Equal("sql_user", builder.UserID);
+        Assert.Equal("secret_password", builder.Password);
     }
 }

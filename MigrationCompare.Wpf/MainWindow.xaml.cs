@@ -5,6 +5,7 @@ using MigrationCompare.Core.Compare;
 using MigrationCompare.Core.Models;
 using MigrationCompare.Core.Quality;
 using MigrationCompare.Core.Report;
+using MigrationCompare.Core.Sources;
 
 namespace MigrationCompare.Wpf;
 
@@ -38,26 +39,49 @@ public partial class MainWindow : Window
         KindA.SelectionChanged += (_, _) => ToggleSourceFields();
         KindB.SelectionChanged += (_, _) => ToggleSourceFields();
         ToggleSourceFields();
-        StatusText.Text = "Siap. Pilih jenis sumber (SQL/CSV), isi konfigurasi, lalu klik 'Bandingkan (A vs B)' atau 'Cek Kualitas'.";
+        ToggleAuthFields(AuthModeA, UserA, PassA);
+        ToggleAuthFields(AuthModeB, UserB, PassB);
+        StatusText.Text = "Siap. Isi Server, Database, Username & Password (atau pilih CSV), lalu klik 'Test Koneksi' atau 'Bandingkan'.";
     }
 
     private void ToggleSourceFields()
     {
         bool sqlA = KindA.SelectedIndex == 0;
+        SqlAuthSectionA.Visibility = sqlA ? Visibility.Visible : Visibility.Collapsed;
         QuerySectionA.Visibility = sqlA ? Visibility.Visible : Visibility.Collapsed;
         BrowseA.Visibility = sqlA ? Visibility.Collapsed : Visibility.Visible;
-        ConnLabelA.Text = sqlA ? "Connection String SQL Server:" : "Lokasi File CSV:";
+        ConnLabelA.Text = sqlA ? "Connection String Tambahan / Override (opsional):" : "Lokasi File CSV:";
         ConnHintA.Text = sqlA
-            ? "Contoh: Server=localhost;Database=DbLama;Trusted_Connection=True;TrustServerCertificate=True;"
+            ? "Opsional jika Server, Database, Username & Password di atas sudah diisi (contoh: Encrypt=False;)."
             : "Contoh: C:\\Data\\transaksi_lama.csv (baris pertama harus berisi nama kolom/header)";
 
         bool sqlB = KindB.SelectedIndex == 0;
+        SqlAuthSectionB.Visibility = sqlB ? Visibility.Visible : Visibility.Collapsed;
         QuerySectionB.Visibility = sqlB ? Visibility.Visible : Visibility.Collapsed;
         BrowseB.Visibility = sqlB ? Visibility.Collapsed : Visibility.Visible;
-        ConnLabelB.Text = sqlB ? "Connection String SQL Server:" : "Lokasi File CSV:";
+        ConnLabelB.Text = sqlB ? "Connection String Tambahan / Override (opsional):" : "Lokasi File CSV:";
         ConnHintB.Text = sqlB
-            ? "Contoh: Server=localhost;Database=DbBaru;Trusted_Connection=True;TrustServerCertificate=True;"
+            ? "Opsional jika Server, Database, Username & Password di atas sudah diisi (contoh: Encrypt=False;)."
             : "Contoh: C:\\Data\\transaksi_baru.csv (baris pertama harus berisi nama kolom/header)";
+    }
+
+    private void AuthModeA_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (UserA is not null && PassA is not null)
+            ToggleAuthFields(AuthModeA, UserA, PassA);
+    }
+
+    private void AuthModeB_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (UserB is not null && PassB is not null)
+            ToggleAuthFields(AuthModeB, UserB, PassB);
+    }
+
+    private static void ToggleAuthFields(ComboBox authMode, TextBox userBox, PasswordBox passBox)
+    {
+        bool sqlLogin = authMode.SelectedIndex == 0;
+        userBox.IsEnabled = sqlLogin;
+        passBox.IsEnabled = sqlLogin;
     }
 
     private void ToleranceBox_Changed(object sender, RoutedEventArgs e)
@@ -83,18 +107,31 @@ public partial class MainWindow : Window
     }
 
     private void FillSampleA_Click(object sender, RoutedEventArgs e) =>
-        FillSample(KindA, ConnectionA, QueryA, KeysA, isSourceA: true);
+        FillSample(KindA, ServerA, DatabaseA, AuthModeA, UserA, PassA, ConnectionA, QueryA, KeysA, isSourceA: true);
 
     private void FillSampleB_Click(object sender, RoutedEventArgs e) =>
-        FillSample(KindB, ConnectionB, QueryB, KeysB, isSourceA: false);
+        FillSample(KindB, ServerB, DatabaseB, AuthModeB, UserB, PassB, ConnectionB, QueryB, KeysB, isSourceA: false);
 
-    private void FillSample(ComboBox kind, TextBox conn, TextBox query, TextBox keys, bool isSourceA)
+    private void FillSample(
+        ComboBox kind,
+        TextBox server,
+        TextBox database,
+        ComboBox authMode,
+        TextBox user,
+        PasswordBox pass,
+        TextBox conn,
+        TextBox query,
+        TextBox keys,
+        bool isSourceA)
     {
         if (kind.SelectedIndex == 0)
         {
-            conn.Text = isSourceA
-                ? "Server=localhost;Database=LegacyDb;Trusted_Connection=True;TrustServerCertificate=True;"
-                : "Server=localhost;Database=NewDb;Trusted_Connection=True;TrustServerCertificate=True;";
+            server.Text = "localhost,1433";
+            database.Text = isSourceA ? "LegacyDb" : "NewDb";
+            authMode.SelectedIndex = 0; // SQL Login (User & Password)
+            user.Text = "sa";
+            pass.Password = "";
+            conn.Text = "";
             query.Text = isSourceA
                 ? "SELECT BillingNo, Amount, Status FROM dbo.Transactions ORDER BY BillingNo"
                 : "SELECT BillingNo, Amount, Status FROM dbo.Transactions_Migrated ORDER BY BillingNo";
@@ -112,16 +149,42 @@ public partial class MainWindow : Window
     private DataSourceDefinition GetSourceDefinition(
         string label,
         ComboBox kind,
+        TextBox server,
+        TextBox database,
+        ComboBox authMode,
+        TextBox user,
+        PasswordBox pass,
         TextBox conn,
         TextBox query,
         TextBox keys,
         IReadOnlyList<string>? fallbackKeys = null,
-        bool includeCompareCols = false)
+        bool includeCompareCols = false,
+        bool requireQueryAndKeys = true)
     {
         var isSql = kind.SelectedIndex == 0;
         var connStr = conn.Text.Trim();
-        if (string.IsNullOrWhiteSpace(connStr))
-            throw new InvalidOperationException($"'{label}': {(isSql ? "connection string SQL" : "path file CSV")} wajib diisi.");
+        var serverStr = server.Text.Trim();
+        var dbStr = database.Text.Trim();
+        var useWindowsAuth = authMode.SelectedIndex == 1;
+        var userStr = useWindowsAuth ? "" : user.Text.Trim();
+        var passStr = useWindowsAuth ? "" : pass.Password;
+
+        if (isSql)
+        {
+            if (string.IsNullOrWhiteSpace(serverStr) && string.IsNullOrWhiteSpace(connStr))
+                throw new InvalidOperationException($"'{label}': Server/Host atau Connection String SQL wajib diisi.");
+
+            if (!useWindowsAuth && string.IsNullOrWhiteSpace(userStr) && string.IsNullOrWhiteSpace(connStr))
+                throw new InvalidOperationException($"'{label}': Username SQL wajib diisi untuk SQL Login (atau pilih Windows Authentication).");
+
+            if (requireQueryAndKeys && string.IsNullOrWhiteSpace(query.Text))
+                throw new InvalidOperationException($"'{label}': query SELECT wajib diisi untuk SQL.");
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(connStr))
+                throw new InvalidOperationException($"'{label}': lokasi file CSV wajib diisi.");
+        }
 
         var keysList = keys.Text
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -130,11 +193,8 @@ public partial class MainWindow : Window
         if (keysList.Count == 0 && fallbackKeys is { Count: > 0 })
             keysList = fallbackKeys.ToList();
 
-        if (keysList.Count == 0)
+        if (requireQueryAndKeys && keysList.Count == 0)
             throw new InvalidOperationException($"'{label}': kolom kunci wajib diisi.");
-
-        if (isSql && string.IsNullOrWhiteSpace(query.Text))
-            throw new InvalidOperationException($"'{label}': query SELECT wajib diisi untuk SQL.");
 
         var compareCols = includeCompareCols
             ? CompareColsInput.Text
@@ -142,15 +202,27 @@ public partial class MainWindow : Window
                 .ToList()
             : new List<string>();
 
-        return new DataSourceDefinition
+        var def = new DataSourceDefinition
         {
             Name = label,
             Kind = isSql ? "sql" : "csv",
             Connection = connStr,
+            Server = serverStr,
+            Database = dbStr,
+            Username = userStr,
+            Password = passStr,
+            UseWindowsAuth = useWindowsAuth,
             Query = isSql ? query.Text.Trim() : "",
             KeyColumns = keysList,
             CompareColumns = compareCols
         };
+
+        if (isSql)
+        {
+            def.Connection = SqlSource.ResolveConnectionString(def);
+        }
+
+        return def;
     }
 
     private void SetBusy(bool isBusy)
@@ -158,17 +230,96 @@ public partial class MainWindow : Window
         CompareBtn.IsEnabled = !isBusy;
         QualityABtn.IsEnabled = !isBusy;
         QualityBBtn.IsEnabled = !isBusy;
+        TestConnA.IsEnabled = !isBusy;
+        TestConnB.IsEnabled = !isBusy;
         CancelBtn.IsEnabled = isBusy;
         BusyBar.Visibility = isBusy ? Visibility.Visible : Visibility.Collapsed;
         if (isBusy) SaveBtn.IsEnabled = false;
+    }
+
+    private async void TestConnA_Click(object sender, RoutedEventArgs e) =>
+        await RunTestConnectionAsync("Sumber A", KindA, ServerA, DatabaseA, AuthModeA, UserA, PassA, ConnectionA, QueryA, KeysA);
+
+    private async void TestConnB_Click(object sender, RoutedEventArgs e) =>
+        await RunTestConnectionAsync("Sumber B", KindB, ServerB, DatabaseB, AuthModeB, UserB, PassB, ConnectionB, QueryB, KeysB);
+
+    private async Task RunTestConnectionAsync(
+        string label,
+        ComboBox kind,
+        TextBox server,
+        TextBox database,
+        ComboBox authMode,
+        TextBox user,
+        PasswordBox pass,
+        TextBox conn,
+        TextBox query,
+        TextBox keys)
+    {
+        try
+        {
+            var def = GetSourceDefinition(label, kind, server, database, authMode, user, pass, conn, query, keys,
+                requireQueryAndKeys: false);
+
+            _cts = new CancellationTokenSource();
+            SetBusy(true);
+            StatusText.Text = $"Menguji koneksi {label}...";
+
+            if (def.Kind == "sql")
+            {
+                var (srv, db, cols) = await SqlSource.TestConnectionAsync(def, timeoutSeconds: 10, _cts.Token);
+                var colInfo = cols.Count > 0
+                    ? $"\n\nQuery valid! Ditemukan {cols.Count} kolom:\n{string.Join(", ", cols)}"
+                    : "\n\n(Query masih kosong — koneksi server/database berhasil diverifikasi.)";
+
+                StatusText.Text = $"Test koneksi {label} berhasil ({srv} / {db}).";
+                MessageBox.Show(
+                    $"Koneksi {label} BERHASIL!\n\nServer: {srv}\nDatabase: {db}{colInfo}",
+                    "Test Koneksi Berhasil",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            else
+            {
+                var cols = await Task.Run(() =>
+                {
+                    using var csv = new CsvSource(def);
+                    return csv.Open();
+                }, _cts.Token);
+
+                StatusText.Text = $"Test file CSV {label} berhasil ({cols.Count} kolom).";
+                MessageBox.Show(
+                    $"File CSV {label} valid!\n\nPath: {def.Connection}\nDitemukan {cols.Count} kolom:\n{string.Join(", ", cols)}",
+                    "Test CSV Berhasil",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText.Text = $"Test koneksi {label} dibatalkan.";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Test koneksi {label} gagal.";
+            MessageBox.Show($"Test koneksi {label} GAGAL:\n\n{ex.Message}",
+                "Test Koneksi Gagal", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetBusy(false);
+            _cts?.Dispose();
+            _cts = null;
+        }
     }
 
     private async void CompareBtn_Click(object sender, RoutedEventArgs e)
     {
         try
         {
-            var a = GetSourceDefinition("Sumber A", KindA, ConnectionA, QueryA, KeysA, includeCompareCols: true);
-            var b = GetSourceDefinition("Sumber B", KindB, ConnectionB, QueryB, KeysB, fallbackKeys: a.KeyColumns);
+            var a = GetSourceDefinition("Sumber A", KindA, ServerA, DatabaseA, AuthModeA, UserA, PassA, ConnectionA, QueryA, KeysA,
+                includeCompareCols: true);
+            var b = GetSourceDefinition("Sumber B", KindB, ServerB, DatabaseB, AuthModeB, UserB, PassB, ConnectionB, QueryB, KeysB,
+                fallbackKeys: a.KeyColumns);
 
             var tol = 0m;
             if (ToleranceBox.IsChecked == true)
@@ -254,16 +405,26 @@ public partial class MainWindow : Window
     }
 
     private async void QualityABtn_Click(object sender, RoutedEventArgs e) =>
-        await RunQualityCheckAsync("Sumber A", KindA, ConnectionA, QueryA, KeysA);
+        await RunQualityCheckAsync("Sumber A", KindA, ServerA, DatabaseA, AuthModeA, UserA, PassA, ConnectionA, QueryA, KeysA);
 
     private async void QualityBBtn_Click(object sender, RoutedEventArgs e) =>
-        await RunQualityCheckAsync("Sumber B", KindB, ConnectionB, QueryB, KeysB);
+        await RunQualityCheckAsync("Sumber B", KindB, ServerB, DatabaseB, AuthModeB, UserB, PassB, ConnectionB, QueryB, KeysB);
 
-    private async Task RunQualityCheckAsync(string label, ComboBox kind, TextBox conn, TextBox query, TextBox keys)
+    private async Task RunQualityCheckAsync(
+        string label,
+        ComboBox kind,
+        TextBox server,
+        TextBox database,
+        ComboBox authMode,
+        TextBox user,
+        PasswordBox pass,
+        TextBox conn,
+        TextBox query,
+        TextBox keys)
     {
         try
         {
-            var def = GetSourceDefinition(label, kind, conn, query, keys);
+            var def = GetSourceDefinition(label, kind, server, database, authMode, user, pass, conn, query, keys);
 
             _cts = new CancellationTokenSource();
             SetBusy(true);
