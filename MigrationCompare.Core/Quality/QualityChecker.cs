@@ -19,11 +19,14 @@ public sealed class QualityReport
 /// <summary>Memeriksa kualitas data dari satu sumber: null, kosong, duplikat key.</summary>
 public sealed class QualityChecker
 {
+    private const int MaxTrackedDuplicateKeys = 50_000;
     private readonly DataSourceDefinition _def;
 
     public QualityChecker(DataSourceDefinition def) => _def = def;
 
-    public QualityReport Check()
+    public QualityReport Check() => Check(null, default);
+
+    public QualityReport Check(IProgress<long>? progress, CancellationToken cancellationToken = default)
     {
         using var source = DataSourceFactory.Create(_def);
         var columns = source.Open();
@@ -42,6 +45,7 @@ public sealed class QualityChecker
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         while (source.ReadRow() is { } row)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             report.TotalRows++;
 
             // Null & kosong per kolom.
@@ -52,22 +56,37 @@ public sealed class QualityChecker
                 else if (string.IsNullOrWhiteSpace(v)) report.EmptyPerColumn[c]++;
             }
 
-            // Duplikat key.
-            var key = BuildKey(row);
-            if (!seen.Add(key))
+            // Duplikat key (tetap hitung total duplikat, batasi detail key agar hemat RAM).
+            if (_def.KeyColumns.Count > 0)
             {
-                report.DuplicateKeys++;
-                report.DuplicateCountPerKey.TryGetValue(key, out var n);
-                report.DuplicateCountPerKey[key] = n + 1;
+                var key = BuildKey(row);
+                if (!seen.Add(key))
+                {
+                    report.DuplicateKeys++;
+                    if (report.DuplicateCountPerKey.TryGetValue(key, out var n))
+                    {
+                        report.DuplicateCountPerKey[key] = n + 1;
+                    }
+                    else if (report.DuplicateCountPerKey.Count < MaxTrackedDuplicateKeys)
+                    {
+                        report.DuplicateCountPerKey[key] = 1;
+                    }
+                }
             }
+
+            if ((report.TotalRows & 0x3FFF) == 0) progress?.Report(report.TotalRows);
         }
 
         report.NullCells = report.NullPerColumn.Values.Sum();
+        progress?.Report(report.TotalRows);
         return report;
     }
 
     private string BuildKey(DataRow row)
     {
+        if (_def.KeyColumns.Count == 1)
+            return row.Get(_def.KeyColumns[0]) ?? "";
+
         var parts = new string[_def.KeyColumns.Count];
         for (int i = 0; i < _def.KeyColumns.Count; i++)
         {

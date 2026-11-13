@@ -1,6 +1,6 @@
+using System.Globalization;
 using Microsoft.Data.SqlClient;
 using MigrationCompare.Core.Models;
-using MigrationCompare.Core.Sources;
 
 namespace MigrationCompare.Core.Sources;
 
@@ -9,27 +9,46 @@ public sealed class SqlSource : IDataSource
 {
     private readonly DataSourceDefinition _def;
     private SqlConnection? _connection;
+    private SqlCommand? _command;
     private SqlDataReader? _reader;
+    private Dictionary<string, int>? _columnIndex;
+    private int _fieldCount;
 
     public string Name => _def.Name;
 
     public SqlSource(DataSourceDefinition def)
     {
-        if (def.Kind != "sql") throw new ArgumentException("Bukan sumber SQL.", nameof(def));
-        if (string.IsNullOrWhiteSpace(def.Query)) throw new ArgumentException("Query kosong.", nameof(def));
+        if (!string.Equals(def.Kind, "sql", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Bukan sumber SQL.", nameof(def));
+        if (string.IsNullOrWhiteSpace(def.Query))
+            throw new ArgumentException("Query kosong.", nameof(def));
         _def = def;
     }
 
     public IReadOnlyList<string> Open()
     {
+        Dispose();
+
         _connection = new SqlConnection(_def.Connection);
         _connection.Open();
 
-        using var cmd = new SqlCommand(_def.Query, _connection);
-        _reader = cmd.ExecuteReader();
+        _command = new SqlCommand(_def.Query, _connection)
+        {
+            CommandTimeout = 0 // Hindari timeout pada query skala jutaan baris
+        };
+        _reader = _command.ExecuteReader();
 
-        var columns = new List<string>();
-        for (int i = 0; i < _reader.FieldCount; i++) columns.Add(_reader.GetName(i));
+        _fieldCount = _reader.FieldCount;
+        var columns = new List<string>(_fieldCount);
+        _columnIndex = new Dictionary<string, int>(_fieldCount, StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < _fieldCount; i++)
+        {
+            var colName = _reader.GetName(i);
+            columns.Add(colName);
+            _columnIndex.TryAdd(colName, i);
+        }
+
         return columns;
     }
 
@@ -37,17 +56,24 @@ public sealed class SqlSource : IDataSource
     {
         if (_reader is null || !_reader.Read()) return null;
 
-        var row = new DataRow();
-        for (int i = 0; i < _reader.FieldCount; i++)
+        var values = new string?[_fieldCount];
+        for (int i = 0; i < _fieldCount; i++)
         {
-            row.Set(_reader.GetName(i), _reader.IsDBNull(i) ? null : _reader.GetValue(i).ToString());
+            if (!_reader.IsDBNull(i))
+            {
+                values[i] = Convert.ToString(_reader.GetValue(i), CultureInfo.InvariantCulture);
+            }
         }
-        return row;
+        return new DataRow(_columnIndex!, values);
     }
 
     public void Dispose()
     {
         _reader?.Dispose();
+        _reader = null;
+        _command?.Dispose();
+        _command = null;
         _connection?.Dispose();
+        _connection = null;
     }
 }
