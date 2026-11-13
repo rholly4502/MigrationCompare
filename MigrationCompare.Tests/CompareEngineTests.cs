@@ -169,6 +169,113 @@ public class CompareEngineTests
     }
 
     [Fact]
+    public void Compare_ParallelLoad_HashJoin_MatchesSerialResults()
+    {
+        var pathA = WriteTempCsv(
+            "BillingNo,Amount,Status\nT001,100.00,Paid\nT002,250.50,Unpaid\nT003,30.00,Paid\nT005,9.00,Paid\n");
+        var pathB = WriteTempCsv(
+            "BillingNo,Amount,Status\nT001,100.00,Paid\nT002,250.51,Unpaid\nT004,10.00,Paid\nT005,9.00,Refunded\n");
+
+        var a = Csv("A", pathA, ["BillingNo"], ["Amount", "Status"]);
+        var b = Csv("B", pathB, ["BillingNo"], ["Amount", "Status"]);
+
+        var serial = new CompareEngine(a, b, numericTolerance: 0.01m).Compare();
+        var parallel = new CompareEngine(a, b, numericTolerance: 0.01m) { ParallelLoad = 4 }.Compare();
+
+        Assert.Equal(serial.TotalA, parallel.TotalA);
+        Assert.Equal(serial.TotalB, parallel.TotalB);
+        Assert.Equal(serial.TotalMatched, parallel.TotalMatched);
+        Assert.Equal(serial.TotalMissingInA, parallel.TotalMissingInA);
+        Assert.Equal(serial.TotalMissingInB, parallel.TotalMissingInB);
+        Assert.Equal(serial.TotalDiffValues, parallel.TotalDiffValues);
+        Assert.Equal(4, parallel.TotalA);
+        Assert.Equal(4, parallel.TotalB);
+
+        // T005 beda status: harus tercatat sebagai beda nilai di kedua jalur.
+        var serT005 = serial.Rows.Single(r => r.Key == "T005");
+        var parT005 = parallel.Rows.Single(r => r.Key == "T005");
+        Assert.Equal(RowStatus.Match, parT005.Status);
+        Assert.Contains("Status", parT005.DifferingColumns);
+        Assert.Equal(serT005.DifferingColumns.OrderBy(c => c), parT005.DifferingColumns.OrderBy(c => c));
+    }
+
+    [Fact]
+    public void Compare_ParallelLoad_SortedMerge_MatchesSerialResults()
+    {
+        var pathA = WriteTempCsv(
+            "BillingNo,Amount,Status\nT001,100.00,Paid\nT001,100.00,Paid\nT002,250.50,Unpaid\nT003,30.00,Paid\n");
+        var pathB = WriteTempCsv(
+            "BillingNo,Amount,Status\nT001,100.00,Paid\nT002,260.00,Paid\nT004,10.00,Paid\n");
+
+        var a = Csv("A", pathA, ["BillingNo"], ["Amount", "Status"]);
+        var b = Csv("B", pathB, ["BillingNo"], ["Amount", "Status"]);
+
+        var serial = new CompareEngine(a, b, numericTolerance: 0m) { AssumeSortedByKey = true }.Compare();
+        var parallel = new CompareEngine(a, b, numericTolerance: 0m) { AssumeSortedByKey = true, ParallelLoad = 4 }.Compare();
+
+        Assert.Equal(serial.TotalA, parallel.TotalA);
+        Assert.Equal(serial.TotalB, parallel.TotalB);
+        Assert.Equal(serial.TotalMatched, parallel.TotalMatched);
+        Assert.Equal(serial.TotalMissingInA, parallel.TotalMissingInA);
+        Assert.Equal(serial.TotalMissingInB, parallel.TotalMissingInB);
+        Assert.Equal(serial.TotalDiffValues, parallel.TotalDiffValues);
+
+        var t002 = parallel.Rows.Single(r => r.Key == "T002");
+        Assert.Equal(["Amount", "Status"], t002.DifferingColumns);
+    }
+
+    [Fact]
+    public void SqlSegmenter_BuildSegmentDefinitions_ProducesNonOverlappingRangeQueries()
+    {
+        var def = new DataSourceDefinition
+        {
+            Name = "A",
+            Kind = "sql",
+            Query = "SELECT BillingNo, Amount FROM dbo.Transactions ORDER BY BillingNo",
+            KeyColumns = ["BillingNo"],
+            CompareColumns = ["Amount"]
+        };
+
+        var analysis = new SqlSegmentAnalysis("BillingNo", 1000, 3, ["T100", "T700"]);
+        var segments = SqlSegmenter.BuildSegmentDefinitions(def, analysis, numericKey: false);
+
+        Assert.Equal(3, segments.Count);
+
+        // Segmen 1: hanya <= T100
+        Assert.Contains("_s WHERE [BillingNo] <= 'T100'", segments[0].Query);
+        // Segmen 2: > T100 AND <= T700
+        Assert.Contains("[BillingNo] > 'T100' AND [BillingNo] <= 'T700'", segments[1].Query);
+        // Segmen 3: > T700
+        Assert.Contains("[BillingNo] > 'T700'", segments[2].Query);
+
+        // Nama difiks akhiran segmen
+        Assert.Equal("A[1/3]", segments[0].Name);
+        Assert.Equal("A[3/3]", segments[2].Name);
+
+        // KeyColumns & CompareColumns tetap diwarisi
+        Assert.Equal("BillingNo", segments[0].KeyColumns.Single());
+        Assert.Equal("Amount", segments[1].CompareColumns.Single());
+    }
+
+    [Fact]
+    public void SqlSegmenter_BuildSegmentDefinitions_NumericKey_QuotesWithNoQuote()
+    {
+        var def = new DataSourceDefinition
+        {
+            Name = "A",
+            Kind = "sql",
+            Query = "SELECT id, v FROM dbo.T",
+            KeyColumns = ["id"],
+        };
+
+        var analysis = new SqlSegmentAnalysis("id", 500, 2, ["250"]);
+        var segments = SqlSegmenter.BuildSegmentDefinitions(def, analysis, numericKey: true);
+
+        Assert.Contains("_s WHERE [id] <= 250", segments[0].Query);
+        Assert.Contains("[id] > 250", segments[1].Query);
+    }
+
+    [Fact]
     public void SqlSource_ResolveConnectionString_UsesSqlAuthAndRemovesTrustedConnection()
     {
         var def = new DataSourceDefinition

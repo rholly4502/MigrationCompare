@@ -334,6 +334,26 @@ public partial class MainWindow : Window
 
             var assumeSorted = StreamingModeBox.IsChecked == true;
 
+            var parallelLoad = ParallelLoadBox.IsChecked == true ? Environment.ProcessorCount : 1;
+            if (parallelLoad > 1 && assumeSorted)
+            {
+                // Merge paralel membuffer A & B; RAM naik, tetapi baca A∥B tumpang tindih.
+                parallelLoad = Math.Max(2, Math.Min(8, Environment.ProcessorCount));
+            }
+
+            var splitSegments = 1;
+            if (AutoSplitBox.IsChecked == true)
+            {
+                if (!int.TryParse(SplitCountInput.Text, out splitSegments) || splitSegments < 2)
+                {
+                    MessageBox.Show("Jumlah segmen harus berupa angka >= 2.", "Input tidak valid",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+                // Auto-split hanya bermakna bersama paralelisasi.
+                parallelLoad = Math.Max(parallelLoad, 2);
+            }
+
             _cts = new CancellationTokenSource();
             SetBusy(true);
             StatusText.Text = assumeSorted
@@ -347,7 +367,9 @@ public partial class MainWindow : Window
 
             var engine = new CompareEngine(a, b, tol)
             {
-                AssumeSortedByKey = assumeSorted
+                AssumeSortedByKey = assumeSorted,
+                ParallelLoad = parallelLoad,
+                SplitSegments = splitSegments
             };
 
             var result = await Task.Run(() => engine.Compare(progress, _cts.Token), _cts.Token);
@@ -611,6 +633,10 @@ public partial class MainWindow : Window
             MessageBox.Show(ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
+    // ===== Auto-Split: enable input jumlah segmen =====
+    private void AutoSplit_Changed(object sender, RoutedEventArgs e)
+        => SplitCountInput.IsEnabled = AutoSplitBox.IsChecked == true;
+
     // ===== Custom title bar: tombol jendela =====
     private void Minimize_Click(object sender, RoutedEventArgs e)
         => WindowState = WindowState.Minimized;

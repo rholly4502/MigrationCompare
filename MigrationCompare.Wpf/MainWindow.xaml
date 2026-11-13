@@ -504,6 +504,16 @@
                                 <CheckBox x:Name="StreamingModeBox" VerticalAlignment="Center" Margin="0,0,0,4"
                                           Content="Mode Streaming Hemat RAM (data terurut ORDER BY key)"
                                           ToolTip="RAM konstan O(1). Wajib query A &amp; B ORDER BY kolom kunci."/>
+                                <CheckBox x:Name="ParallelLoadBox" VerticalAlignment="Center" IsChecked="True" Margin="0,0,16,0"
+                                          Content="Paralel baca A &amp; B (akselerasi)"
+                                          ToolTip="Membaca kedua sumber bersamaan. Untuk Mode Streaming, A &amp; B di-buffer (RAM naik) tapi waktu baca tumpang tindih."/>
+                                <CheckBox x:Name="AutoSplitBox" VerticalAlignment="Center" IsChecked="False" Margin="0,0,6,0"
+                                          Content="Auto-Split SQL besar" Checked="AutoSplit_Changed" Unchecked="AutoSplit_Changed"
+                                          ToolTip="Bagi query SQL besar menjadi N segmen (dihitung otomatis via COUNT + NTILE) dan baca paralel. Hanya untuk sumber SQL dengan satu kolom kunci."/>
+                                <TextBox x:Name="SplitCountInput" Width="52" VerticalAlignment="Center" Text="4"
+                                         IsEnabled="False"
+                                         ToolTip="Jumlah segmen total yang diinginkan (bukan range manual)"/>
+                                <TextBlock Text="segmen" VerticalAlignment="Center" Foreground="#64748B" FontSize="12"/>
                             </WrapPanel>
 
                             <WrapPanel Orientation="Horizontal">
